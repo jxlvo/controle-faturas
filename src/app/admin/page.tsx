@@ -18,7 +18,7 @@ export default function AdminPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Extrai o mês do nome do arquivo (ex: Nubank_2026-07-01.csv -> 2026-07)
+    // Extrai o padrão YYYY-MM do nome do arquivo (ex: Nubank_2026-07-01.csv)
     const match = file.name.match(/_(\d{4}-\d{2})/);
     if (match) setInvoiceMonth(match[1]);
 
@@ -32,7 +32,25 @@ export default function AdminPage() {
             title: row.title,
             amount: parseFloat(row.amount.replace(',', '.')),
           }))
-          .filter((exp) => exp.amount > 0 && !isNaN(exp.amount)); // Ignora pagamentos da fatura
+          .filter((exp) => {
+            // 1. Ignora pagamentos de fatura e estornos (valores negativos ou zerados)
+            if (exp.amount <= 0 || isNaN(exp.amount)) return false;
+
+            // 2. Identifica se é uma compra parcelada procurando o padrão "numero/numero" (ex: 2/5)
+            const installmentMatch = exp.title.match(/(\d+)\/(\d+)/);
+            
+            if (installmentMatch) {
+              const currentInstallment = parseInt(installmentMatch[1], 10);
+              
+              // Se for a parcela 2 em diante, joga fora, pois o banco já criou as futuras quando a 1/x foi lida
+              if (currentInstallment > 1) {
+                return false;
+              }
+            }
+
+            // Se for uma compra à vista ou a parcela "1/x", mantém na fila
+            return true;
+          });
 
         setExpensesQueue(validExpenses);
       },
