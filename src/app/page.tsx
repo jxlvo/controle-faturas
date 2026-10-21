@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { sumInCents, formatCents } from '@/lib/money';
+import { nextDueInvoiceMonth } from '@/lib/invoice';
 
 type Expense = {
   id: string;
@@ -38,19 +39,13 @@ export default function DashboardPage() {
           return;
         }
 
-        // Seleciona o mês atual por padrão (fuso de São Paulo). Se não houver fatura
-        // nesse mês, usa a mais próxima anterior.
-        const currentMonth = new Intl.DateTimeFormat('en-CA', {
-          timeZone: 'America/Sao_Paulo',
-          year: 'numeric',
-          month: '2-digit',
-        })
-          .format(new Date())
-          .slice(0, 7); // ex: "2026-10"
+        // Abre na fatura que vence a seguir (a que ainda vai ser paga), pelo dia de vencimento.
+        // Se ainda não houver nada nesse mês, usa a mais próxima anterior.
+        const targetMonth = nextDueInvoiceMonth(); // ex: "2026-11"
 
-        // `months` está em ordem decrescente, então o primeiro <= mês atual é o mais próximo
+        // `months` está em ordem decrescente, então o primeiro <= mês alvo é o mais próximo
         // anterior. Se só existirem meses futuros, pega o mais próximo deles (o último da lista).
-        setSelectedMonth(months.find((m) => m <= currentMonth) ?? months[months.length - 1]);
+        setSelectedMonth(months.find((m) => m <= targetMonth) ?? months[months.length - 1]);
       })
       .catch((error) => {
         // Evita ficar preso em "Carregando fatura..." quando o banco não responde
