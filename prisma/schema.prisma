@@ -17,4 +17,7 @@ model Expense {
   invoiceMonth    String   // Mês da fatura (ex: "2026-07")
   isInstallment   Boolean  @default(false)
   createdAt       DateTime @default(now())
+
+  // Acelera a consulta da página inicial (filtra por mês da fatura e pessoa)
+  @@index([invoiceMonth, responsible])
 }
