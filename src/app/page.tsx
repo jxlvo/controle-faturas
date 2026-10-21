@@ -19,22 +19,43 @@ export default function DashboardPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedPerson, setSelectedPerson] = useState<'Julinho' | 'Fabiana'>('Julinho');
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     // Busca todos os dados do banco quando a tela carrega
     fetch('/api/expenses')
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error('Falha ao buscar faturas');
+        return res.json();
+      })
       .then((data: Expense[]) => {
         setAllExpenses(data);
-        
+
         // Extrai apenas os meses únicos que existem no banco (ex: ['2026-07', '2026-08'])
         const months = Array.from(new Set(data.map((e) => e.invoiceMonth))).sort().reverse();
         setAvailableMonths(months);
-        
-        // Já deixa selecionado o mês mais recente por padrão
+
+        // Seleciona o mês atual por padrão (fuso de São Paulo). Se não houver fatura
+        // nesse mês, usa a mais próxima anterior.
         if (months.length > 0) {
-          setSelectedMonth(months[0]);
+          const currentMonth = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Sao_Paulo',
+            year: 'numeric',
+            month: '2-digit',
+          })
+            .format(new Date())
+            .slice(0, 7); // ex: "2026-10"
+
+          // `months` está em ordem decrescente, então o primeiro <= mês atual é o mais próximo
+          // anterior. Se só existirem meses futuros, pega o mais próximo deles (o último da lista).
+          setSelectedMonth(months.find((m) => m <= currentMonth) ?? months[months.length - 1]);
         }
+        setIsLoading(false);
+      })
+      .catch((error) => {
+        // Evita ficar preso em "Carregando fatura..." quando o banco não responde
+        console.error(error);
+        setLoadError(true);
         setIsLoading(false);
       });
   }, []);
@@ -49,6 +70,14 @@ export default function DashboardPage() {
 
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-500">Carregando fatura...</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-500 text-center p-8">
+        Não foi possível carregar as faturas. Tente novamente em instantes.
+      </div>
+    );
   }
 
   return (
