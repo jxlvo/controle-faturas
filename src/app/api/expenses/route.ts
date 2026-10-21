@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { roundMoney } from '@/lib/money';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { expense, currentInvoiceMonth, responsible } = body;
     const expensesToSave = [];
-    
+    const amount = roundMoney(expense.amount); // sempre com no máximo 2 casas decimais
+
     // Procura o padrão de parcelamento (ex: "Parcela 1/3")
     const match = expense.title.match(/Parcela\s+(\d+)\/(\d+)/i);
     
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
         expensesToSave.push({
           purchaseDate: new Date(expense.date),
           title: nextTitle,
-          amount: expense.amount,
+          amount,
           responsible: responsible,
           invoiceMonth: formattedNextMonth,
           isInstallment: true
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
       expensesToSave.push({
         purchaseDate: new Date(expense.date),
         title: expense.title,
-        amount: expense.amount,
+        amount,
         responsible: responsible,
         invoiceMonth: currentInvoiceMonth,
         isInstallment: false

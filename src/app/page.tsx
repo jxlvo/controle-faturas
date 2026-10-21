@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { sumInCents, formatCents } from '@/lib/money';
 
 type Expense = {
   id: string;
@@ -96,8 +97,8 @@ export default function DashboardPage() {
     ? []
     : monthExpenses.filter((e) => e.responsible === selectedPerson);
 
-  // Soma o total exato daquela pessoa naquele mês
-  const totalAmount = displayExpenses.reduce((sum, item) => sum + item.amount, 0);
+  // Soma o total exato daquela pessoa naquele mês (em centavos, sem erro de ponto flutuante)
+  const totalCents = sumInCents(displayExpenses.map((item) => item.amount));
 
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-500">Carregando fatura...</div>;
@@ -160,7 +161,7 @@ export default function DashboardPage() {
         }`}>
           <h2 className="text-lg font-medium opacity-90 mb-1">Total a pagar em {selectedMonth}</h2>
           <p className="text-5xl font-bold">
-            {isMonthLoading ? '...' : `R$ ${totalAmount.toFixed(2).replace('.', ',')}`}
+            {isMonthLoading ? '...' : `R$ ${formatCents(totalCents)}`}
           </p>
         </div>
 
