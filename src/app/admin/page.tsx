@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Papa from 'papaparse';
+import { removeAlreadyImported, type StoredExpense } from '@/lib/dedupe';
 
 type Expense = {
   date: string;
@@ -13,10 +14,13 @@ export default function AdminPage() {
   const [expensesQueue, setExpensesQueue] = useState<Expense[]>([]);
   const [invoiceMonth, setInvoiceMonth] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [notice, setNotice] = useState<string>('');
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    setNotice('');
 
     // Extrai o padrão YYYY-MM do nome do arquivo (ex: Nubank_2026-07-01.csv)
     const match = file.name.match(/_(\d{4}-\d{2})/);
@@ -25,7 +29,7 @@ export default function AdminPage() {
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      complete: (results) => {
+      complete: async (results) => {
         const validExpenses = results.data
           .map((row: any) => ({
             date: row.date,
@@ -52,7 +56,33 @@ export default function AdminPage() {
             return true;
           });
 
-        setExpensesQueue(validExpenses);
+        // Sem o mês no nome do arquivo não dá para saber o que já foi importado
+        if (!match) {
+          setNotice('Não achei o mês no nome do arquivo, então não consegui checar compras repetidas.');
+          setExpensesQueue(validExpenses);
+          return;
+        }
+
+        // Tira da fila o que já está gravado nesse mês, para não duplicar ao subir o mesmo CSV de novo
+        try {
+          const response = await fetch(`/api/expenses?month=${match[1]}`);
+          if (!response.ok) throw new Error('Falha ao buscar compras já importadas');
+
+          const stored: StoredExpense[] = await response.json();
+          const { pending, skipped } = removeAlreadyImported(validExpenses, stored);
+
+          if (skipped > 0) {
+            setNotice(
+              pending.length === 0
+                ? 'Esta fatura já foi totalmente importada. Nada a classificar.'
+                : `${skipped} compra(s) já estavam salvas e foram puladas.`
+            );
+          }
+          setExpensesQueue(pending);
+        } catch (error) {
+          console.error(error);
+          alert('Não foi possível verificar as compras já importadas. Tente enviar o arquivo de novo.');
+        }
       },
     });
   };
@@ -92,6 +122,12 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-gray-100 p-8 flex flex-col items-center">
       <h1 className="text-3xl font-bold mb-8 text-gray-800">Classificação de Fatura</h1>
+
+      {notice && (
+        <p className="w-full max-w-md mb-4 p-3 rounded-md bg-blue-50 text-blue-800 text-sm text-center">
+          {notice}
+        </p>
+      )}
 
       {expensesQueue.length === 0 ? (
         <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">

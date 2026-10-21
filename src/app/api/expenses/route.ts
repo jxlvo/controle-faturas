@@ -1,30 +1,14 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { prisma } from '@/lib/prisma';
+import { roundMoney } from '@/lib/money';
 
-// 1. Pegamos a URL do banco e usamos a classe URL do JS para interpretá-la
-const rawUrl = process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL || '';
-const url = new URL(rawUrl);
-
-// 2. Removemos cirurgicamente qualquer parâmetro da Vercel (ex: ?sslmode=require) que esteja causando conflito
-url.search = '';
-const cleanConnectionString = url.toString();
-
-// 3. Agora sim, aplicamos nossa regra e criamos a conexão sem o bloqueio de certificado
-const pool = new Pool({
-  connectionString: cleanConnectionString,
-  ssl: { rejectUnauthorized: false }
-});
-
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { expense, currentInvoiceMonth, responsible } = body;
     const expensesToSave = [];
-    
+    const amount = roundMoney(expense.amount); // sempre com no máximo 2 casas decimais
+
     // Procura o padrão de parcelamento (ex: "Parcela 1/3")
     const match = expense.title.match(/Parcela\s+(\d+)\/(\d+)/i);
     
@@ -54,7 +38,7 @@ export async function POST(request: Request) {
         expensesToSave.push({
           purchaseDate: new Date(expense.date),
           title: nextTitle,
-          amount: expense.amount,
+          amount,
           responsible: responsible,
           invoiceMonth: formattedNextMonth,
           isInstallment: true
@@ -65,7 +49,7 @@ export async function POST(request: Request) {
       expensesToSave.push({
         purchaseDate: new Date(expense.date),
         title: expense.title,
-        amount: expense.amount,
+        amount,
         responsible: responsible,
         invoiceMonth: currentInvoiceMonth,
         isInstallment: false
@@ -81,16 +65,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Erro ao salvar despesa' }, { status: 500 });
   }
 }
-// Adicione isso no final do arquivo src/app/api/expenses/route.ts
 
-export async function GET() {
+// GET /api/expenses?month=2026-10 → só as compras daquele mês de fatura
+export async function GET(request: Request) {
+  const month = new URL(request.url).searchParams.get('month') ?? '';
+
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return NextResponse.json({ error: 'Informe o mês no formato AAAA-MM' }, { status: 400 });
+  }
+
   try {
     const expenses = await prisma.expense.findMany({
-      // Traz as compras organizadas por mês de fatura
-      orderBy: { invoiceMonth: 'desc' }
+      where: { invoiceMonth: month },
+      orderBy: [{ purchaseDate: 'asc' }, { createdAt: 'asc' }],
     });
     return NextResponse.json(expenses);
   } catch (error) {
+    console.error('Erro ao buscar faturas:', error);
     return NextResponse.json({ error: 'Erro ao buscar faturas' }, { status: 500 });
   }
 }

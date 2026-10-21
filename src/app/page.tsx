@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { sumInCents, formatCents } from '@/lib/money';
 
 type Expense = {
   id: string;
@@ -12,43 +13,103 @@ type Expense = {
 };
 
 export default function DashboardPage() {
-  const [allExpenses, setAllExpenses] = useState<Expense[]>([]);
+  const [monthExpenses, setMonthExpenses] = useState<Expense[]>([]);
+  const [loadedMonth, setLoadedMonth] = useState<string>(''); // mês a que `monthExpenses` pertence
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
-  
+
   // Controles de visualização
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedPerson, setSelectedPerson] = useState<'Julinho' | 'Fabiana'>('Julinho');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // só a primeira carga da tela
+  const [loadError, setLoadError] = useState(false);
 
+  // 1) Ao abrir a tela, busca só a lista de meses que existem no banco (ex: ['2026-08', '2026-07'])
   useEffect(() => {
-    // Busca todos os dados do banco quando a tela carrega
-    fetch('/api/expenses')
-      .then((res) => res.json())
-      .then((data: Expense[]) => {
-        setAllExpenses(data);
-        
-        // Extrai apenas os meses únicos que existem no banco (ex: ['2026-07', '2026-08'])
-        const months = Array.from(new Set(data.map((e) => e.invoiceMonth))).sort().reverse();
+    fetch('/api/expenses/months')
+      .then((res) => {
+        if (!res.ok) throw new Error('Falha ao buscar meses');
+        return res.json();
+      })
+      .then((months: string[]) => {
         setAvailableMonths(months);
-        
-        // Já deixa selecionado o mês mais recente por padrão
-        if (months.length > 0) {
-          setSelectedMonth(months[0]);
+
+        if (months.length === 0) {
+          setIsLoading(false);
+          return;
         }
+
+        // Seleciona o mês atual por padrão (fuso de São Paulo). Se não houver fatura
+        // nesse mês, usa a mais próxima anterior.
+        const currentMonth = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Sao_Paulo',
+          year: 'numeric',
+          month: '2-digit',
+        })
+          .format(new Date())
+          .slice(0, 7); // ex: "2026-10"
+
+        // `months` está em ordem decrescente, então o primeiro <= mês atual é o mais próximo
+        // anterior. Se só existirem meses futuros, pega o mais próximo deles (o último da lista).
+        setSelectedMonth(months.find((m) => m <= currentMonth) ?? months[months.length - 1]);
+      })
+      .catch((error) => {
+        // Evita ficar preso em "Carregando fatura..." quando o banco não responde
+        console.error(error);
+        setLoadError(true);
         setIsLoading(false);
       });
   }, []);
 
-  // Filtra as despesas cruzando o Mês Selecionado COM a Pessoa Selecionada
-  const displayExpenses = allExpenses.filter(
-    (e) => e.invoiceMonth === selectedMonth && e.responsible === selectedPerson
-  );
+  // 2) Sempre que o mês selecionado muda, busca só as compras daquele mês
+  useEffect(() => {
+    if (!selectedMonth) return;
 
-  // Soma o total exato daquela pessoa naquele mês
-  const totalAmount = displayExpenses.reduce((sum, item) => sum + item.amount, 0);
+    let cancelled = false; // ignora respostas de um mês que já não está selecionado
+
+    fetch(`/api/expenses?month=${selectedMonth}`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Falha ao buscar faturas');
+        return res.json();
+      })
+      .then((data: Expense[]) => {
+        if (cancelled) return;
+        setMonthExpenses(data);
+        setLoadedMonth(selectedMonth);
+        setIsLoading(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error(error);
+        setLoadError(true);
+        setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMonth]);
+
+  // Enquanto o mês escolhido ainda não chegou do servidor
+  const isMonthLoading = selectedMonth !== '' && loadedMonth !== selectedMonth;
+
+  // Filtra as despesas do mês carregado pela Pessoa Selecionada
+  const displayExpenses = isMonthLoading
+    ? []
+    : monthExpenses.filter((e) => e.responsible === selectedPerson);
+
+  // Soma o total exato daquela pessoa naquele mês (em centavos, sem erro de ponto flutuante)
+  const totalCents = sumInCents(displayExpenses.map((item) => item.amount));
 
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center text-gray-500">Carregando fatura...</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-gray-500 text-center p-8">
+        Não foi possível carregar as faturas. Tente novamente em instantes.
+      </div>
+    );
   }
 
   return (
@@ -100,7 +161,7 @@ export default function DashboardPage() {
         }`}>
           <h2 className="text-lg font-medium opacity-90 mb-1">Total a pagar em {selectedMonth}</h2>
           <p className="text-5xl font-bold">
-            R$ {totalAmount.toFixed(2).replace('.', ',')}
+            {isMonthLoading ? '...' : `R$ ${formatCents(totalCents)}`}
           </p>
         </div>
 
@@ -122,7 +183,7 @@ export default function DashboardPage() {
                 {displayExpenses.length === 0 ? (
                   <tr>
                     <td colSpan={2} className="p-8 text-center text-gray-400">
-                      Nenhuma despesa para {selectedPerson} neste mês.
+                      {isMonthLoading ? 'Carregando fatura...' : `Nenhuma despesa para ${selectedPerson} neste mês.`}
                     </td>
                   </tr>
                 ) : (
