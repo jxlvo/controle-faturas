@@ -63,16 +63,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Erro ao salvar despesa' }, { status: 500 });
   }
 }
-// Adicione isso no final do arquivo src/app/api/expenses/route.ts
 
-export async function GET() {
+// GET /api/expenses?month=2026-10 → só as compras daquele mês de fatura
+export async function GET(request: Request) {
+  const month = new URL(request.url).searchParams.get('month') ?? '';
+
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return NextResponse.json({ error: 'Informe o mês no formato AAAA-MM' }, { status: 400 });
+  }
+
   try {
     const expenses = await prisma.expense.findMany({
-      // Traz as compras organizadas por mês de fatura
-      orderBy: { invoiceMonth: 'desc' }
+      where: { invoiceMonth: month },
+      orderBy: [{ purchaseDate: 'asc' }, { createdAt: 'asc' }],
     });
     return NextResponse.json(expenses);
   } catch (error) {
+    console.error('Erro ao buscar faturas:', error);
     return NextResponse.json({ error: 'Erro ao buscar faturas' }, { status: 500 });
   }
 }
